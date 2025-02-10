@@ -1,0 +1,17 @@
+set lhapdf /home/amandeep/LHAPDF-6.5.5/MYBUILD/bin/lhapdf-config
+import  model ALP_linear_UFO/
+define q = p/g
+generate q q > ax j j
+output test
+launch test
+set CGtil = 0.
+set CaPhi = 0.
+
+set fa = 1000.
+set Ma = 5.
+
+set pdlabel lhapdf
+set lhaid 263400
+
+set WALP auto
+done
