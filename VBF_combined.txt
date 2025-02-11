@@ -1,0 +1,31 @@
+import model ALP_linear_UFO/
+define q = p / g
+generate  q q > j j ax QCD=0 QED=1 /g 
+output test_VBF_combined
+launch test_VBF_combined
+done
+# set to electron beams (0 for ele, 1 for proton)
+set lpp1 1
+set lpp2 1
+set ebeam1 6500
+set ebeam2 6500
+# set ALP mass
+set Ma scan:[5,15,30,60,80,100]
+
+# set ALP couplings
+set cgtil = 0.0
+set cwtil = 1.0
+set cbtil = 1.0
+set caphi = 1.0
+#set individual couplings
+set cww = 1.
+set caa = 1.
+set caz = 1.
+set czz = 1.
+set czh = 0.
+set caww = 1.
+set cwwz = 1.
+# set supression scale in the effective operators coupling the ALP to SM particles
+#set falp = 1000
+set ptj = 10.
+set drjj = 0.2
