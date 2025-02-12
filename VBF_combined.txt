@@ -1,0 +1,45 @@
+import model MY_ALP_linear_UFO/
+define q = p / g
+generate  q q > j j ax QCD=0 NP=1 QED=2 /g 
+output test_VBF_combined
+launch test_VBF_combined
+done
+# set to electron beams (0 for ele, 1 for proton)
+set lpp1 1
+set lpp2 1
+set ebeam1 6500
+set ebeam2 6500
+# set ALP mass
+set Ma = scan:[5,15,30,60,80,100]
+#set Ma = 5
+# set ALP couplings
+set cgtil = 0.0
+set cwtil = 1.0
+set cbtil = 1.0
+set caphi = 0.0
+#set individual couplings; fermion-ALP couplings are set to zero anyway  
+set cbb = 0.
+set ctt = 0.
+set css = 0.
+set ccc = 0
+set cdd = 0.
+set cuu = 0.
+set ctautau = 0.
+set cmumu = 0.
+set cee = 0.
+#Imp couplings 
+set cww = 1.
+set caa = 1.
+set caz = 1.
+set czz = 1.
+set czh = 0.
+set caww = 1.
+set cwwz = 1.
+
+# set supression scale in the effective operators coupling the ALP to SM particles
+set fa = 1000
+set ptj = 10.
+set drjj = 0.2
+
+set WALP auto
+done
