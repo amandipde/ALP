@@ -1,6 +1,6 @@
 import model MY_ALP_linear_UFO/
 define q = p / g
-generate  q q > j j ax QCD=0 NP=1 QCD=2 /g
+generate  q q > j j ax QCD=0 NP=1 QED=2 /g
 output test_VBF_gamma
 launch test_VBF_gamma
 done
