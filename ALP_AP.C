@@ -38,89 +38,291 @@ class ExRootResult;
 using namespace std;
 using namespace fastjet;
 using namespace contrib;
-//-------------------------------------------------
-TLorentzVector reconstructNeutrino(const TLorentzVector& lep, double met, double met_phi) {
+///////////////////////////////////////////////////////
+/*
+TLorentzVector reconstructNeutrino(const TLorentzVector& lep,
+                                   double met_px,
+                                   double met_py)
+{
+    const double mW = 80.385;
+    const double pxl = lep.Px();
+    const double pyl = lep.Py();
+    const double pzl = lep.Pz();
+    const double El  = lep.E();
 
-    const double MW = 80.4;
+    const double ptNu2 = met_px * met_px + met_py * met_py;
+    const double dotLT = pxl * met_px + pyl * met_py;
 
-    // MET components
+    // Quadratic equation: a pz_nu^2 + b pz_nu + c = 0
+    const double a = pzl * pzl - El * El;
+    const double b = mW * mW * pzl + 2.0 * pzl * dotLT;
+    const double c = 0.25 * std::pow(mW, 4) + dotLT * dotLT + mW * mW * dotLT - El * El * ptNu2;
+
+    double disc = b * b - 4.0 * a * c;
+
+    // Novak et al.: for negative discriminant, set Delta = 0
+    if (disc < 0.0) disc = 0.0;
+
+    const double sqrtDisc = std::sqrt(disc);
+    const double pz1 = (-b + sqrtDisc) / (2.0 * a);
+    const double pz2 = (-b - sqrtDisc) / (2.0 * a);
+
+    TLorentzVector nu1, nu2;
+    nu1.SetPxPyPzE(met_px, met_py, pz1, std::sqrt(ptNu2 + pz1 * pz1));
+    nu2.SetPxPyPzE(met_px, met_py, pz2, std::sqrt(ptNu2 + pz2 * pz2));
+
+    TLorentzVector W1 = lep + nu1;
+    TLorentzVector W2 = lep + nu2;
+
+    // Selection 3 variable: p_nu . p_W using 3-vectors
+    const double dot1 = nu1.Px() * W1.Px() + nu1.Py() * W1.Py() + nu1.Pz() * W1.Pz();
+    const double dot2 = nu2.Px() * W2.Px() + nu2.Py() * W2.Py() + nu2.Pz() * W2.Pz();
+
+    // Combined selection from page 6
+    const bool pass1 = (pz1 > 30.0); // 50
+    const bool pass2 = (pz2 > 30.0);
+
+    if (pass1 && !pass2) return nu1;
+    if (!pass1 && pass2) return nu2;
+
+    if (pass1 && pass2) {
+        // Page 6 says apply Selection 3 if both solutions are above 50 GeV
+        // Backup slides define Selection 3 with threshold 2500 GeV^2
+        const bool sel3_1 = (dot1 >= 1000.0);
+        const bool sel3_2 = (dot2 >= 1000.0);
+
+        if (sel3_1 && !sel3_2) return nu1;
+        if (!sel3_1 && sel3_2) return nu2;
+
+        // If both pass or both fail, choose the one with larger p_nu . p_W
+        return (dot1 >= dot2) ? nu1 : nu2;
+    }
+
+    // If both are below 50 GeV, choose lower | p_nu . p_W * a/b |
+    double val1 = 1e30;
+    double val2 = 1e30;
+
+    if (std::abs(b) > 1e-12) {
+        val1 = std::abs(dot1 * a / b);
+        val2 = std::abs(dot2 * a / b);
+    }
+
+    return (val1 <= val2) ? nu1 : nu2;
+}
+*/
+
+TLorentzVector reconstructNeutrino(
+    const TLorentzVector& lep,
+    double met, double met_phi){
+    const double MW = 80.379;
+
     double met_px = met * cos(met_phi);
     double met_py = met * sin(met_phi);
 
-    double px_l = lep.Px();
-    double py_l = lep.Py();
-    double pz_l = lep.Pz();
-    double E_l  = lep.E();
+    // --- tunable parameters ---
+    double sigma_MET = 10.0;  // Met resolution in GeV 
+    double sigma_W   = 3.0;   // W width is 2.1 GeV
+    double sigma_pz   = 100.0;   // pz regularization
+    //double sigma_pz = 0.5 * (lep.Pt() + met);
 
-    double pt_l2 = px_l*px_l + py_l*py_l;
+    double bestChi2 = 1e20;
+    TLorentzVector bestNu;
 
-    double Lambda = MW*MW/2.0 + px_l*met_px + py_l*met_py;
+    // --- scan region (keep this modest) ---
+    for (double dx = -10; dx <= 10; dx += 1.0) {
+        for (double dy = -10; dy <= 10; dy += 1.0) {
 
-    double discriminant = Lambda*Lambda - pt_l2*(met_px*met_px + met_py*met_py);
+            double nu_px = met_px + dx;
+            double nu_py = met_py + dy;
 
-    double pz_nu;
+            // --- solve quadratic for pz ---
+            double mu = (MW*MW - lep.M2())/2.0
+                      + lep.Px()*nu_px + lep.Py()*nu_py;
 
-    if (discriminant >= 0) {
+            double El = lep.E();
+            double a  = El*El - lep.Pz()*lep.Pz();
+            double b  = -2.0 * mu * lep.Pz();
+            double c  = mu*mu - El*El*(nu_px*nu_px + nu_py*nu_py);
 
-        double sqrtD = sqrt(discriminant);
+            double disc = b*b - 4*a*c;
 
-        double pz1 = (Lambda * pz_l + E_l * sqrtD) / pt_l2;
-        double pz2 = (Lambda * pz_l - E_l * sqrtD) / pt_l2;
+            if (disc < 0) continue;
 
-        // Build neutrino candidates
-        TLorentzVector nu1, nu2;
+            double sqrtD = sqrt(disc);
 
-        double E1 = sqrt(met_px*met_px + met_py*met_py + pz1*pz1);
-        double E2 = sqrt(met_px*met_px + met_py*met_py + pz2*pz2);
+            for (int sol = 0; sol < 2; sol++) {
 
-        nu1.SetPxPyPzE(met_px, met_py, pz1, E1);
-        nu2.SetPxPyPzE(met_px, met_py, pz2, E2);
+                double pz = (sol == 0)
+                          ? (-b + sqrtD)/(2*a)
+                          : (-b - sqrtD)/(2*a);
 
-        // Reconstruct W
-        TLorentzVector W1 = lep + nu1;
-        TLorentzVector W2 = lep + nu2;
+                // --- Reject unphysical large pz ---
+                //if (fabs(pz) > 300.0) continue;
+                          
+                double nu_E = sqrt(nu_px*nu_px + nu_py*nu_py + pz*pz);
 
-        double mW1 = W1.M();
-        double mW2 = W2.M();
+                TLorentzVector nu(nu_px, nu_py, pz, nu_E);
+                TLorentzVector W = lep + nu;
 
-        // Choose solution closer to MW
-        if (fabs(mW1 - MW) < fabs(mW2 - MW)) {
-            pz_nu = pz1;
-        } else {
-            pz_nu = pz2;
+                double mW = W.M();
+
+                // --- χ² ---
+                double chi2_MET = (dx*dx + dy*dy)/(sigma_MET*sigma_MET);
+                double chi2_W   = (mW - MW)*(mW - MW)/(sigma_W*sigma_W);
+                double chi2_pz  = (pz*pz)/(sigma_pz*sigma_pz);
+
+                
+                double chi2 = chi2_MET + chi2_W + chi2_pz;
+                //double chi2 = chi2_W;
+
+                if (chi2 < bestChi2) {
+                    bestChi2 = chi2;
+                    bestNu = nu;
+                }
+
+                else if (fabs(chi2 - bestChi2) < 0.1) {
+                    // tie-breaker: prefer smaller |pz|
+                    if (fabs(pz) < fabs(bestNu.Pz())) {
+                        bestNu = nu;
+                    }
+                }    
+            }
         }
-
-    } else {
-        // Complex solution => take real part
-        //pz_nu = (Lambda * pz_l) / pt_l2;
-        met_px = 0;
-        met_py = 0;
-        pz_nu = 0;
     }
 
-    // Final neutrino
-    TLorentzVector nu;
-    double Enu = sqrt(met_px*met_px + met_py*met_py + pz_nu*pz_nu);
-    nu.SetPxPyPzE(met_px, met_py, pz_nu, Enu);
+    // --- fallback if nothing found ---
+    if (bestChi2 > 1e10) {
+        double mu = (MW*MW - lep.M2())/2.0
+                  + lep.Px()*met_px + lep.Py()*met_py;
 
-    return nu;
+        double a = lep.Pt()*lep.Pt();
+        double b = -2.0 * mu * lep.Pz();
+
+        double pz = -b / (2.0 * a);
+
+        double E = sqrt(met_px*met_px + met_py*met_py + pz*pz);
+        bestNu.SetPxPyPzE(met_px, met_py, pz, E);
+    }
+
+    return bestNu;
 }
+
+////////////////////////////////
+/*
+TLorentzVector reconstructNeutrino(const TLorentzVector& lep, double met, double met_phi) {
+
+    // --- Neutrino pT from MET ---
+    double nu_px = met * std::cos(met_phi);
+    double nu_py = met * std::sin(met_phi);
+
+    // --- W mass constraint: (l + nu)^2 = MW^2  ---
+    // Expand: 2*(El*Enu - pl*pnu) = MW^2 - Ml^2
+    // Define: mu = (MW^2 - Ml^2)/2 + (lep.Px()*nu_px + lep.Py()*nu_py)
+    // Then:   El * pz_nu - lep.Pz() * pz_nu = mu  (quadratic in pz_nu)
+
+    const double MW = 80.379;   // GeV
+    double sigma_W   = 3.0;   // W width is 2.1 GeV
+
+    double Ml2 = lep.M2();
+
+    double mu = (MW * MW - Ml2) / 2.0
+                + lep.Px() * nu_px
+                + lep.Py() * nu_py;
+
+    // Quadratic: (El^2 - lep.Pz()^2) * pz^2  -  2*mu*lep.Pz() * pz  -  (mu^2 - El^2*met^2) = 0
+    double El  = lep.E();
+    double a   =  El * El - lep.Pz() * lep.Pz();    // = lep.Pt()^2
+    double b   = -2.0 * mu * lep.Pz();
+    double c   =  mu * mu - El * El * met * met;
+
+    double discriminant = b * b - 4.0 * a * c;
+
+    double nu_pz = 0.0;
+
+    if (discriminant >= 0.0) {
+        // --- Two real solutions: pick the one with smaller |pz| ---
+        double sqrt_disc = std::sqrt(discriminant);
+        double pz1 = (-b + sqrt_disc) / (2.0 * a);
+        double pz2 = (-b - sqrt_disc) / (2.0 * a);
+        // Build both W candidates
+        double nu_E1 = std::sqrt(nu_px*nu_px + nu_py*nu_py + pz1*pz1);
+        TLorentzVector nu1(nu_px, nu_py, pz1, nu_E1);
+        TLorentzVector W1 = lep + nu1;
+        double mW1 = W1.M();
+        
+        double nu_E2 = std::sqrt(nu_px*nu_px + nu_py*nu_py + pz2*pz2);
+        TLorentzVector nu2(nu_px, nu_py, pz2, nu_E2);
+        TLorentzVector W2 = lep + nu2;
+        double mW2 = W2.M();
+        
+        double chi2_W1   = (mW1 - MW)*(mW1 - MW)/(sigma_W*sigma_W);
+        double chi2_W2  = (mW2 - MW)*(mW2 - MW)/(sigma_W*sigma_W);
+
+        // Choose solution closest to MW
+        //nu_pz = (std::abs(mW1 - MW) < std::abs(mW2 - MW)) ? pz1 : pz2;
+        nu_pz = (chi2_W1 <= chi2_W2) ? pz1 : pz2;
+
+    } else {
+        // --- Complex solutions: take real part (collinear approximation) ---
+        // Physically: MET resolution smeared the W off-shell.
+        // Standard fix: set discriminant=0 and rescale mu to make it real.
+        // Equivalent to rescaling MET such that W is exactly on-shell.
+        //nu_pz = -b / (2.0 * a);   // real part of complex solution
+        nu_px = 0;
+        nu_py = 0;  
+        nu_pz = 0;  
+    }
+
+    // --- Build neutrino 4-momentum (massless) ---
+    double nu_E = std::sqrt(nu_px * nu_px + nu_py * nu_py + nu_pz * nu_pz);
+
+    TLorentzVector neutrino;
+    neutrino.SetPxPyPzE(nu_px, nu_py, nu_pz, nu_E);
+
+    return neutrino;
+}
+*/
 //------------------------------------------------------------------------------
+
 
 void AnalyseEvents(ExRootTreeReader *treeReader)
 {
+
+    
+  TH1F *hist_lep_rap_gen = new TH1F("lep_rap_gen","lep_rap_gen", 20, -4.5 , 4.5);
+  TH1F *hist_mag_3momenta_Wgen = new TH1F("w_3momenta_gen","w_3momenta_gen", 20, 0., 1000);
+  TH1F *hist_mag_3momenta_W = new TH1F("w_3momenta","w_3momenta", 20, 0., 1000);
+  TH1F *hist_W_mass_gen = new TH1F("W_mass_gen","W_mass_gen", 20, 40., 160);
+
+
+
   TH1F* hist_MET = new TH1F("missing Et", "Missing Et", 100,0.0,1000);
+  TH1F* hist_nu_pt = new TH1F("nu_pt", "nu_pt", 100,0.0,1000);
+  TH1F* hist_nu_pz_diff_gen = new TH1F("nu_pz_diff_gen", "nu_pz_gen", 15,-10,140);
+  TH1F* hist_nu_pz_diff = new TH1F("nu_pz_diff", "nu_pz_diff", 15,-10,140);
+
+  TH1F* hist_nu_pxpy_diff_gen = new TH1F("nu_pxpy_diff_gen", "nu_pxpy_diff_gen", 15,-10,140);
+  TH1F* hist_nu_pxpy_diff = new TH1F("nu_pxpy_diff", "nu_pxpy_diff", 15,-10,140);
+
+
   TH1F* hist_MET_gen = new TH1F("missing_Et_gen", "Missing_Et_gen", 100,0.0,1000);
+  TH1F *hist_dphi_Wrecopt_digam_gen = new TH1F("dphi_Wrecopt_digam_gen","dphi_Wrecopt_digam_gen", 100, -6.0, 6.);
+
+  TH1F* hist_DR_gen_Del_lep = new TH1F("DR_gen_Del_lep", "DR_gen_Del_lep", 100,0.0,1);
+
+  TH1F *hist_dphi_lep_MET_gen = new TH1F("dphi_lep_MET_gen","dphi_lep_MET_gen", 100, -6.0, 6.);
 
   TH1F* hist_neutrino_pt = new TH1F("neutrino_pt", "neutrino_pt", 100,0.0,1000);
 
   TH1F* hist_Ngam = new TH1F("Ngam", "Ngam", 10,0.0,10);
+  TH1F* hist_lep_size = new TH1F("Nlep", "Nlep",5,0,5);
+
   TH1F* hist_inv_diphoton = new TH1F("inv_diphoton", "inv_diphoton", 100,0.0,100);
   TH1F *hist_ratio_ptl_ptW = new TH1F("ratio_ptl_ptW","ratio_ptl_ptW", 100, 0, 1);
   TH1F *hist_ratio_ptl_ptdigam = new TH1F("ratio_ptl_ptdigam","ratio_ptl_ptdigam", 100, 0, 1);
 
   //TH1F *hist_= new TH1F("delta R of two gamma from ALP","delta R of two gamma from ALP", 40, 0.0, 1.);
-  TH1F *hist_W_pt = new TH1F("pt_W_gen","pt_W_gen", 100, 0.0, 1000.);
+  TH1F *hist_W_pt_gen = new TH1F("pt_W_gen","pt_W_gen", 100, 0.0, 1000.);
   TH1F *hist_W_pt1 = new TH1F("pt_W1","pt_W1", 100, 0.0, 1000.);
   TH1F *hist_W_pt2 = new TH1F("pt_W2","pt_W2", 100, 0.0, 1000.);
   TH1F *hist_W_pt3 = new TH1F("pt_W3","pt_W3", 100, 0.0, 1000.);
@@ -131,15 +333,18 @@ void AnalyseEvents(ExRootTreeReader *treeReader)
   TH2F* h2_ptlep_vs_Wreco = new TH2F("ptlep_vs_Wreco", "p_{T}^{l} vs reco p_{T}^{W}; reco p_{T}^{W} [GeV]; p_{T}^{l} [GeV]", 100, 0, 1000, 100, 0., 1000);
   TH2F* h2_ptlep_vs_digam = new TH2F("ptlep_vs_digam", "p_{T}^{l} vs p_{T}^{2#gamma}; p_{T}^{2#gamma} [GeV]; p_{T}^{l} [GeV]", 100, 0, 1000, 100, 0., 1000);
   TH1F *hist_LP = new TH1F("LP","LP", 100, -2, 2.);
+  TH1F *hist_LP_gen = new TH1F("LP_gen","LP_gen", 100, -2, 2.);
   
 
   TH1F *hist_W_eta = new TH1F("eta_W","eta_W", 100, -6.0, 6.);
-  TH1F *hist_W_mass = new TH1F("m_W","m_W", 100, 0, 100);
+  TH1F *hist_W_mass = new TH1F("W_mass","W_mass", 20, 40., 160);
+
   TH1F *hist_W_phi = new TH1F("phi_W","phi_W", 100, -6.0, 6.);
-  TH1F* h_cos_theta_star = new TH1F("cos_theta_star", "cos_theta_star", 20, -1.0, 1.0);  
+  TH1F* h_cos_theta_star = new TH1F("cos_theta_star", "cos_theta_star", 20, -1.0, 1.0); 
+
   TH1F* h_cos_theta_star_from_LP = new TH1F("cos_theta_star_from_LP", "cos_theta_star_from_LP", 20, -1.0, 1.0);  
 
-
+  TH1F* h_cos_theta_star_cut1_gen = new TH1F("cos_theta_star_cut1_gen", "cos_theta_star_cut1_gen", 20, -1.0, 1.0); 
   TH1F* h_cos_theta_star_cut1 = new TH1F("cos_theta_star_cut1", "cos_theta_star_cut1", 20, -1.0, 1.0); 
   TH1F* h_cos_theta_star_from_LP_cut1 = new TH1F("cos_theta_star_from_LP_cut1", "cos_theta_star_from_LP_cut1", 20, -1.0, 1.0);  
   TH1F *hist_LP_cut1 = new TH1F("LP_cut1","LP_cut1", 100, -2, 2.);
@@ -153,6 +358,8 @@ void AnalyseEvents(ExRootTreeReader *treeReader)
   TH1F* h_cos_theta_star_new = new TH1F("cos_theta_star_new", "cos_theta_star_new", 20, 0., 1.0); 
 
   TH1F* h_cos_theta_star_new_cut1 = new TH1F("cos_theta_star_new_cut1", "cos_theta_star_new_cut1", 20, 0., 1.0); 
+  TH1F* h_cos_theta_star_new_cut1_gen = new TH1F("cos_theta_star_new_cut1_gen", "cos_theta_star_new_cut1_gen", 20, 0., 1.0); 
+
 
   
   TH1F* h_phi_star_cut = new TH1F("phi_star_cut", "phi_star_cut", 20, 0., 3.5); 
@@ -222,8 +429,8 @@ void AnalyseEvents(ExRootTreeReader *treeReader)
   GenParticle *mother;
   Int_t i, j;
   //////////////////Varibles ///////
+   //TFile *outfile = new TFile("/data/SOM_Test/ALP_test/OutputFile_Higgs_Wp_125_Delphes.root","RECREATE");
    TFile *outfile = new TFile("/data/SOM_Test/ALP_test/OutputFile_Higgs_Wp_125_Delphes.root","RECREATE");
-   //TFile *outfile = new TFile("/data/SOM_Test/ALP_test/OutputFile_ALP_Wp_25_Delphes.root","RECREATE");
 
   TTree *tree=new TTree("Tree","Signal");
   Float_t  W_reco_pt = 0., Lep_pt=0., MET_et = 0.0,  Cos_theta_star =0.0, Dphi_Lep_MET=0., Dphi_Wrecp_Diphoton=0.,Deta_Wrecp_Diphoton=0., Phi_star=0.;
@@ -234,10 +441,8 @@ void AnalyseEvents(ExRootTreeReader *treeReader)
   tree->Branch("W_reco_pt",&W_reco_pt,"W_reco_pt/F");
   tree->Branch("Lep_pt",&Lep_pt,"Lep_pt/F");
   tree->Branch("MET_et",&MET_et,"MET_et/F");
-  tree->Branch("Cos_theta_star",&Cos_theta_star,"Cos_theta_star/F");
   tree->Branch("Dphi_Lep_MET",&Dphi_Lep_MET,"Dphi_Lep_MET/F");
   tree->Branch("Cos_theta_star",&Cos_theta_star,"Cos_theta_star/F");
-  tree->Branch("Dphi_Wrecp_Diphoton",&Dphi_Wrecp_Diphoton,"Dphi_Wrecp_Diphoton/F");
   tree->Branch("Deta_Wrecp_Diphoton",&Deta_Wrecp_Diphoton,"Deta_Wrecp_Diphoton/F");
   tree->Branch("Phi_star",&Phi_star,"Phi_star/F");
   tree->Branch("Dphi_Wrecp_Diphoton",&Dphi_Wrecp_Diphoton,"Dphi_Wrecp_Diphoton/F");
@@ -357,33 +562,73 @@ for(int i = 0; i < branchParticle->GetEntriesFast(); ++i) {
 } //end of genparticle loop
 ////////////////////////Gen Level Checks/////////////////////
 GenParticle *W = (GenParticle*) branchParticle->At(W_idx);
-GenParticle *ALP = (GenParticle*) branchParticle->At(W_idx);
+GenParticle *ALP = (GenParticle*) branchParticle->At(ALP_idx);
 GenParticle *lepton = (GenParticle*) branchParticle->At(lepton_idx); 
 GenParticle *neutrino = (GenParticle*) branchParticle->At(neutrino_idx); 
 GenParticle *gamma1 = (GenParticle*) branchParticle->At(ALP_gam1); 
 GenParticle *gamma2 = (GenParticle*) branchParticle->At(ALP_gam2);
-if (lepton->PT > 20 && abs(lepton->Eta) < 2.5  && gamma1->PT > 10 && 
-gamma2->PT > 10 && abs(gamma1->Eta) < 2.5 && abs(gamma2->Eta) < 2.5  && Genmet->MET > 20){ 
-hist_MET_gen->Fill(Genmet->MET);
-hist_lep_pt_gen->Fill(lepton->PT);
+TLorentzVector lep_vec_org_gen;
+if (lepton->PT > 20 && abs(lepton->Eta) < 2.5  && gamma1->PT > 10 && gamma2->PT > 10 && abs(gamma1->Eta) < 2.5 && 
+abs(gamma2->Eta) < 2.5  && Genmet->MET > 20){ 
 
-TLorentzVector W_vec(W->Px, W->Py, W->Pz, W->E);
+    TLorentzVector W_vec_gen(W->Px, W->Py, W->Pz, W->E);
+    TLorentzVector neutrino_vec_gen(neutrino->Px, neutrino->Py, neutrino->Pz, neutrino->E);
+    TLorentzVector lep_vec_gen(lepton->Px, lepton->Py, lepton->Pz, lepton->E);
+    TLorentzVector gam1_vec_gen(gamma1->Px, gamma1->Py, gamma1->Pz, gamma1->E);
+    TLorentzVector gam2_vec_gen(gamma2->Px, gamma2->Py, gamma2->Pz, gamma2->E);
+    TLorentzVector diphoton_gen = gam1_vec_gen + gam2_vec_gen ;
+    lep_vec_org_gen.SetPxPyPzE(0,0,0,0);
+    lep_vec_org_gen = lep_vec_gen;
+    TLorentzVector nu_reco_gen(0,0,0,0);
+    nu_reco_gen = reconstructNeutrino(lep_vec_org_gen, Genmet->MET, Genmet->Phi);
+    //cout<<nu_reco.Pt()<<"   "<<W_reco.M()<<endl;
+    // Reconstruct W
+    TLorentzVector W_reco_gen = lep_vec_org_gen + nu_reco_gen;
 
-TLorentzVector lep_vec(lepton->Px, lepton->Py, lepton->Pz, lepton->E);
-TLorentzVector lep_vec_org = lep_vec;
-hist_W_pt->Fill(W->PT);
-TVector3 boostW = W_vec.BoostVector();
-lep_vec.Boost(-boostW);
-TVector3 lep_dir_Wrest = lep_vec.Vect().Unit();   // lepton in W rest frame
-TVector3 W_dir_lab     = W_vec.Vect().Unit();     // W direction in lab
-double cos_theta_star_gen = lep_dir_Wrest.Dot(W_dir_lab);
-h_cos_theta_star_gen->Fill(cos_theta_star_gen);
+    if(nu_reco_gen.Pt() == 0 ) continue;
 
-double costhetastar_equivalant = abs(lepton->E - neutrino->E)/W_vec.Vect().Mag();
+    //cout<<W_vec_gen.Vect().Mag()<<"  "<<W_reco_gen.Vect().Mag()<<endl;
+    hist_W_mass_gen->Fill(W_reco_gen.M());
+    hist_MET_gen->Fill(Genmet->MET);
+    hist_lep_pt_gen->Fill(lepton->PT);
+    hist_lep_rap_gen->Fill(lep_vec_org_gen.Eta());
+    hist_nu_pt->Fill(neutrino->PT);
 
-h_cos_theta_star_new_gen->Fill(costhetastar_equivalant);
+    hist_nu_pz_diff_gen->Fill(abs(neutrino->Pz) - abs(nu_reco_gen.Pz()));
+    hist_nu_pxpy_diff_gen->Fill(sqrt(pow(neutrino->Px - nu_reco_gen.Px(),2) + sqrt(pow(neutrino->Py - nu_reco_gen.Py(),2))));
+
+
+    hist_dphi_lep_MET_gen->Fill(abs(lep_vec_org_gen.DeltaPhi(neutrino_vec_gen)));
+    hist_dphi_Wrecopt_digam_gen->Fill(abs(W_vec_gen.DeltaPhi(diphoton_gen)));
+
+    hist_mag_3momenta_Wgen->Fill(W_vec_gen.Vect().Mag());
+    hist_W_pt_gen->Fill(W_vec_gen.Pt());
+    
+    TVector3 boostW = W_vec_gen.BoostVector();
+    lep_vec_gen.Boost(-boostW);
+    TVector3 lep_dir_Wrest = lep_vec_gen.Vect().Unit();   // lepton in W rest frame
+    TVector3 W_dir_lab     = W_vec_gen.Vect().Unit();     // W direction in lab
+    double cos_theta_star_gen = lep_dir_Wrest.Dot(W_dir_lab);
+    h_cos_theta_star_gen->Fill(cos_theta_star_gen);
+    double costhetastar_equivalant = abs(lepton->E - neutrino->E)/W_vec_gen.Vect().Mag();
+
+    h_cos_theta_star_new_gen->Fill(costhetastar_equivalant);
+    
+    /////LP 
+    double LP_gen= (lep_vec_org_gen.Px()*W_vec_gen.Px() + lep_vec_org_gen.Py()*W_vec_gen.Py())
+                  / (W_vec_gen.Px()*W_vec_gen.Px() + W_vec_gen.Py()*W_vec_gen.Py());
+
+    hist_LP_gen->Fill(LP_gen);
+
+    if (W_vec_gen.Pt() > 75) {
+        h_cos_theta_star_cut1_gen->Fill(cos_theta_star_gen);
+        h_cos_theta_star_new_cut1_gen->Fill(costhetastar_equivalant);
+        
+    }
+
 }
-////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
 //vector<Photon*> Photon_vec;
 std::vector<fastjet::PseudoJet> Photon_vec;
 
@@ -391,7 +636,7 @@ if (branchPhoton->GetEntriesFast() > 1){
 for(int k = 0; k < branchPhoton->GetEntriesFast(); ++k ){
  photon = (Photon*) branchPhoton->At(k);     
  TLorentzVector photonMomentum = photon->P4();
- if(photonMomentum.E() > 10 && photonMomentum.Eta()< 2.5) {   
+ if(photonMomentum.Pt() > 10 && fabs(photonMomentum.Eta())< 2.5) {   
     fastjet::PseudoJet pseudoJet(photonMomentum.Px(), photonMomentum.Py(), 
                                      photonMomentum.Pz(), photonMomentum.E());
     Photon_vec.push_back(pseudoJet);
@@ -428,28 +673,44 @@ for(Int_t i = 0; i < branchMuon->GetEntriesFast(); ++i) {
       }
     }
 //cout<<Lepton_vec.size()<<endl;
+hist_lep_size->Fill(Lepton_vec.size());
+
+////////////////////////////////////Delphes Level///////////////////////////
 double cos_theta_star =-5, phi_star = -5;    
 if(Lepton_vec.size() >= 1 && Photon_vec.size() >= 2 && met->MET > 20){ //////////////////////////Basic Selection
-    hist_MET->Fill(met->MET);
+
     Lepton_vec = sorted_by_pt(Lepton_vec);
+    //cout<<Photon_vec[0].delta_R(Photon_vec[1])<<"  "<<Lepton_vec[0].delta_R(Photon_vec[1])<<endl;
+
     TLorentzVector lep_vec(Lepton_vec[0].px(), Lepton_vec[0].py(), Lepton_vec[0].pz(), Lepton_vec[0].e());
     TLorentzVector lep_vec_org = lep_vec;
+    // Reconstruct neutrino
+    TLorentzVector nu_reco = reconstructNeutrino(lep_vec_org, met->MET, met->Phi);
+    TLorentzVector W_reco = lep_vec_org + nu_reco;
+
+    //cout<<nu_reco.Pt()<<"   "<<W_reco.M()<<endl;
+    if(nu_reco.Pt() == 0 ) continue;
+
+    hist_nu_pz_diff->Fill(abs(neutrino->Pz) - abs(nu_reco.Pz()));
+    hist_nu_pxpy_diff->Fill(sqrt(pow(neutrino->Px - nu_reco.Px(),2) + sqrt(pow(neutrino->Py - nu_reco.Py(),2))));
+
+    hist_W_mass->Fill(W_reco.M());
+
+
+    hist_MET->Fill(met->MET);
+    hist_DR_gen_Del_lep->Fill(lep_vec_org.DeltaR(lep_vec_org_gen));
 
     TLorentzVector gam1_vec(Photon_vec[0].px(), Photon_vec[0].py(), Photon_vec[0].pz(), Photon_vec[0].e());
     TLorentzVector gam2_vec(Photon_vec[1].px(), Photon_vec[1].py(), Photon_vec[1].pz(), Photon_vec[1].e());
     TLorentzVector diphoton = gam1_vec + gam2_vec;
     hist_W_pt1->Fill(diphoton.Pt());
-
-// reconstruct neutrino from met 
-
-    // Reconstruct neutrino
-    TLorentzVector nu_reco = reconstructNeutrino(lep_vec_org, met->MET, met->Phi);
-    //cout<<nu_reco.Pt()<<"   "<<W_reco.M()<<endl;
-    if(nu_reco.Pt() == 0 ) continue;
+    
     // Reconstruct W
-    TLorentzVector W_reco = lep_vec_org + nu_reco;
-    //cout<<W->PT<<"   "<<W_reco.Pt()<<"   "<<W_reco.M()<<endl;
+    hist_dphi_lep_MET->Fill(abs(lep_vec_org.DeltaPhi(nu_reco)));
 
+    hist_mag_3momenta_W->Fill(W_reco.Vect().Mag());
+
+    //cout<<W->PT<<"   "<<W_reco.Pt()<<"   "<<W_reco.M()<<endl;
 
     W_reco_pt = 0., Lep_pt = 0., MET_et=0., Dphi_Wrecp_Diphoton=0., Deta_Wrecp_Diphoton=0.;
     W_reco_pt = W_reco.Pt();
@@ -478,7 +739,6 @@ if(Lepton_vec.size() >= 1 && Photon_vec.size() >= 2 && met->MET > 20){ /////////
     TVector3 W_dir_lab     = W_reco.Vect().Unit();     // W direction in lab
 
     cos_theta_star = lep_dir_Wrest.Dot(W_dir_lab);
-
 
     Cos_theta_star =0, Phi_star = 0;
     Cos_theta_star = cos_theta_star;
@@ -517,7 +777,6 @@ h_phi_star_cut->Fill(Phi_star);
 hist_lep_pt->Fill(lep_vec_org.Pt());
 hist_sig_lep_rap->Fill(lep_vec_org.Eta());
 
-hist_dphi_lep_MET->Fill(abs(lep_vec_org.DeltaPhi(nu_reco)));
 hist_dphi_lep_gamma1->Fill(lep_vec_org.DeltaPhi(gam1_vec));
 hist_dphi_lep_gamma2->Fill(lep_vec_org.DeltaPhi(gam2_vec));
 hist_dR_lep_gamma1->Fill(lep_vec_org.DeltaR(gam2_vec));
@@ -530,7 +789,9 @@ LP=0.;
 TVector3 pT_3lep = lep_vec_org.Vect();
 TVector3 pT_3W   = W_reco.Vect();
 
-LP= pT_3lep.Dot(pT_3W)/pT_3W.Mag2();
+//LP= pT_3lep.Dot(pT_3W)/pT_3W.Mag2();
+LP = (lep_vec_org.Px()*W_reco.Px() + lep_vec_org.Py()*W_reco.Py())
+                  / (W_reco.Px()*W_reco.Px() + W_reco.Py()*W_reco.Py());
 
 h_cos_theta_star_new->Fill(abs(lep_vec_org.E() - nu_reco.E())/pT_3W.Mag());
 
@@ -555,10 +816,6 @@ if(W_reco.Pt() > 75){
     h_cos_theta_star_new_cut1->Fill(abs(lep_vec_org.E() - nu_reco.E())/pT_3W.Mag());
 
 }
-
-
-
-
 }
 
 
@@ -582,18 +839,35 @@ n11<<"   "<<n12<<"  "<<n13<<"   "<<n14<<"  "<<n15<<endl;
     hist_cut_flow->GetXaxis()->SetBinLabel(i+1, cuts[i]);
     }
 outfile->Write();
-TFile *fout = TFile::Open("/data/SOM_Test/ALP_test/Result_Higgs_Wp_125_Delphes.root","RECREATE");
-//TFile *fout = TFile::Open("/data/SOM_Test/ALP_test/Result_ALP_Wp_25_Delphes.root","RECREATE");
+ //TFile *fout = TFile::Open("/data/SOM_Test/ALP_test/Result_Higgs_Wp_125_Delphes.root","RECREATE");
+ TFile *fout = TFile::Open("/data/SOM_Test/ALP_test/Result_Higgs_Wp_125_Delphes.root","RECREATE");
 
 fout->cd();
+
+hist_W_mass_gen->Write();
+hist_W_mass->Write();
+hist_nu_pt->Write();
+hist_nu_pz_diff_gen->Write();
+hist_nu_pz_diff->Write();
+hist_nu_pxpy_diff_gen->Write();
+hist_nu_pxpy_diff->Write();
+
+hist_mag_3momenta_Wgen->Write();
+hist_mag_3momenta_W->Write();
+hist_DR_gen_Del_lep->Write();
+hist_lep_rap_gen->Write();
+hist_dphi_Wrecopt_digam_gen->Write();
+hist_dphi_lep_MET_gen->Write();
 hist_lep_pt_gen->Write();
+hist_LP_gen->Write();
 hist_MET_gen->Write();
 h_cos_theta_star_gen->Write();
 h_cos_theta_star_new_gen->Write();
 hist_MET->Write();
 hist_Ngam->Write();
+hist_lep_size->Write();
 hist_inv_diphoton->Write();
-hist_W_pt->Write();
+hist_W_pt_gen->Write();
 hist_W_pt1->Write();
 hist_W_pt2->Write();
 hist_W_pt3->Write();
@@ -609,7 +883,9 @@ hist_ratio_ptl_ptW->Write();
 hist_ratio_ptl_ptdigam->Write();
 hist_LP->Write();
 h_cos_theta_star_new->Write();
+h_cos_theta_star_cut1_gen->Write();
 h_cos_theta_star_new_cut1->Write();
+h_cos_theta_star_new_cut1_gen->Write();
 hist_lep_pt->Write();
 hist_sig_lep_rap->Write();
 
