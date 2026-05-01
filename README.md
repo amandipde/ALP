@@ -1,4 +1,4 @@
-# Search for ALP in associated vector bsoson production at LHC
+# Search for ALP in associated vector boson production at LHC
 
 ## Production in Madgraph 
 Process $pp \to ALP/H (\gamma \gamma) W (\ell \nu)$ is generated in Madgraph for 14 TeV CM energy and later for hadronization Pythia8 and collider efficiencies are imposed using Delphes (HL LHC card). Similarly processes including $Z$ boson are also procduced where $Z \to \ell^+ \ell^-$. 
